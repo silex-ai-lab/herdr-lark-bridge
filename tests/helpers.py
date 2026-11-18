@@ -50,6 +50,9 @@ class FakeHerdr:
     def read(self, pane_id: str, lines: int) -> str:
         return self.screen
 
+    def read_visible(self, pane_id: str) -> str:
+        return self.screen
+
     def prompt(self, pane_id: str, text: str) -> None:
         self.calls.append(("prompt", pane_id, text))
 

@@ -53,6 +53,12 @@ def test_read_argv():
     )]
 
 
+def test_read_visible_argv_has_no_line_count():
+    c, r = cli()
+    c.read_visible("w1:p1")
+    assert r.argv == [("agent", "read", "w1:p1", "--source", "visible", "--format", "text")]
+
+
 def test_done_agent_without_completion_seq_parses_as_none():
     raw = (
         '{"result":{"agents":[{"terminal_id":"t","pane_id":"p","workspace_id":"w",'

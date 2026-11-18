@@ -21,6 +21,7 @@ class HerdrError(Exception):
 class HerdrPort(Protocol):
     def list_agents(self) -> list[AgentSnapshot]: ...
     def read(self, pane_id: str, lines: int) -> str: ...
+    def read_visible(self, pane_id: str) -> str: ...
     def prompt(self, pane_id: str, text: str) -> None: ...
     def send_keys(self, pane_id: str, keys: Sequence[str]) -> None: ...
     def send_text(self, pane_id: str, text: str) -> None: ...
@@ -112,10 +113,19 @@ class HerdrCli:
         return parse_agent_list(agents_raw, labels)
 
     def read(self, pane_id: str, lines: int) -> str:
-        return self._run((
-            "agent", "read", pane_id, "--source", "recent",
-            "--lines", str(lines), "--format", "text",
-        ))
+        try:
+            return self._run((
+                "agent", "read", pane_id, "--source", "recent",
+                "--lines", str(lines), "--format", "text",
+            ))
+        except HerdrError as e:
+            # herdr refuses scrollback capture on a busy alternate-screen agent
+            if "agent_not_idle" not in str(e):
+                raise
+            return self.read_visible(pane_id)
+
+    def read_visible(self, pane_id: str) -> str:
+        return self._run(("agent", "read", pane_id, "--source", "visible", "--format", "text"))
 
     def prompt(self, pane_id: str, text: str) -> None:
         self._run(("agent", "prompt", pane_id, text))

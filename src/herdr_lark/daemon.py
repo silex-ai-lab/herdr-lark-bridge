@@ -12,6 +12,7 @@ from .lark import LarkClient, LarkError, LarkTransport
 from .models import (
     Action,
     AgentSnapshot,
+    AttentionKind,
     Config,
     Ignore,
     Inbound,
@@ -114,7 +115,7 @@ class Engine:
 
     def _notify(self, n: Notification, owner: str, note: str | None = None) -> bool:
         try:
-            screen = self._herdr.read(n.snapshot.pane_id, self._screen_read_lines())
+            screen = self._read_for(n.kind, n.snapshot.pane_id)
         except HerdrError as e:
             if n.kind == "blocked":
                 log.warning("cannot read screen for %s: %s", n.snapshot.display_name, e)
@@ -131,8 +132,10 @@ class Engine:
         log.info("notified %s for %s seq=%d", n.kind, n.snapshot.display_name, n.seq)
         return True
 
-    def _screen_read_lines(self) -> int:
-        return self._cfg.screen_lines * READ_FACTOR
+    def _read_for(self, kind: AttentionKind, pane_id: str) -> str:
+        if kind == "blocked":
+            return self._herdr.read_visible(pane_id)
+        return self._herdr.read(pane_id, self._cfg.screen_lines * READ_FACTOR)
 
     def handle_inbound(self, inbound: Inbound) -> None:
         now = self._clock()
@@ -175,7 +178,7 @@ class Engine:
             )
 
     def _dialog_unchanged(self, pane_id: str, expected: str) -> bool:
-        return screen_digest(self._herdr.read(pane_id, self._screen_read_lines())) == expected
+        return screen_digest(self._herdr.read_visible(pane_id)) == expected
 
     def _dialog_changed(
         self, inbound: Inbound, owner: str, pane_id: str, snapshots: Sequence[AgentSnapshot]
