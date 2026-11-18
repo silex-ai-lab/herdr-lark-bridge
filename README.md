@@ -141,3 +141,7 @@ uv run pyright
 ```
 
 Tests that need the real `herdr` binary skip when it is absent. Pure functions `decide` (what to notify) and `route` (what a DM does) sit in the middle, with Herdr and Lark as adapters behind small interfaces. One engine thread owns all state. User-facing strings live in `src/herdr_lark/messages.py`, one table per language.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

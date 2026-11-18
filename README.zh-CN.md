@@ -48,3 +48,7 @@ herdr-lark service uninstall
 uv tool uninstall herdr-lark-bridge
 rm -r ~/.config/herdr-lark ~/.local/state/herdr-lark ~/Library/Logs/herdr-lark
 ```
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。
