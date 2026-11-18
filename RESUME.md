@@ -11,8 +11,8 @@ other people to install.
 
 ## State
 
-- `main` is pushed to `silex-ai-lab/herdr-lark-bridge` (private, MIT). CI is
-  green on macOS and Ubuntu at `45a8d3a`.
+- `main` is pushed to `silex-ai-lab/herdr-lark-bridge` (public, MIT). CI is
+  green on macOS and Ubuntu.
 - Verified live on the author's Mac against real Lark and real agents: pairing,
   blocked notification plus key reply, refusal of a free-text reply to a blocked
   dialog, done notification plus prompt reply, no duplicates across restarts,
@@ -45,16 +45,11 @@ other people to install.
 - The second and third rounds of changes (review fixes, easy setup) had no
   second independent review.
 
-## Open decisions for the owner
-
-- Make the repository public or keep it private.
-- Copyright line in `LICENSE` reads `Silex AI`.
-
 ## Next steps
 
 1. Have someone else install from the README on a clean machine and record
    where they get stuck.
-2. Before going public: one more independent review of the routing and pairing
+2. Public since 2026-11-18. Still owed: one more independent review of the routing and pairing
    code, and a real-tty run of `herdr-lark setup`.
 3. Candidates, none started: Lark card buttons for approvals instead of typed
    keys, a systemd user unit for Linux, re-notify when a blocked dialog changes
