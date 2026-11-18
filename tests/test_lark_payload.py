@@ -38,3 +38,25 @@ def test_parse_event_reads_text_and_reply_ids():
 def test_parse_event_non_text_has_empty_text():
     i = parse_event(event(message_type="image", content="{}"))
     assert i is not None and i.text == ""
+
+
+def test_parse_event_reads_create_time_milliseconds_as_seconds():
+    for raw in ("1700000000123", 1700000000123):
+        i = parse_event(event(create_time=raw))  # type: ignore[arg-type]
+        assert i is not None and i.created_at == 1700000000.123
+
+
+def test_parse_event_without_or_with_garbage_create_time_has_none():
+    i = parse_event(event())
+    assert i is not None and i.created_at is None
+    i = parse_event(event(create_time="soon"))
+    assert i is not None and i.created_at is None
+
+
+def test_lark_sdk_logs_at_warning_so_websocket_url_is_not_logged():
+    import logging
+
+    from herdr_lark.lark import LarkClient
+
+    LarkClient("cli_x", "secret")
+    assert logging.getLogger("Lark").level == logging.WARNING

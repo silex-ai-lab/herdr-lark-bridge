@@ -22,6 +22,14 @@ def state_path() -> Path:
     return base / "state.json"
 
 
+def owner_path() -> Path:
+    return config_dir() / "owner"
+
+
+def pairing_path() -> Path:
+    return config_dir() / "pairing.json"
+
+
 def load_config(path: Path | None = None) -> Config:
     path = path or config_dir() / "config.toml"
     try:
@@ -44,6 +52,11 @@ def load_config(path: Path | None = None) -> Config:
         done_delay_seconds=float(data.get("done_delay_seconds", d.done_delay_seconds)),
         screen_lines=int(data.get("screen_lines", d.screen_lines)),
         read_lines=int(data.get("read_lines", d.read_lines)),
+        shortcut_minutes=float(data.get("shortcut_minutes", d.shortcut_minutes)),
+        max_inbound_age_seconds=float(
+            data.get("max_inbound_age_seconds", d.max_inbound_age_seconds)
+        ),
+        prune_after_seconds=float(data.get("prune_after_seconds", d.prune_after_seconds)),
     )
 
 

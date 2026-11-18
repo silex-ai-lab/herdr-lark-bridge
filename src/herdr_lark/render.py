@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+
 from .models import Notification, Outbound
 
-MAX_CODE_CHARS = 20_000
+MAX_CODE_CHARS = 8_000
+DIGEST_LINES = 15
 
 NEEDS = {"blocked": "等待审批", "done": "已完成，等你下一步"}
 
 HINTS = {
-    "blocked": "引用回复本消息：y / n / 1 / 2 / enter / esc 等按键，或任意文字（原样输入后回车）。",
+    "blocked": (
+        "引用回复本消息。按键：只写按键名，如 1、y、down enter（y n 0-9 enter esc tab up down left right space）。"
+        "输入文字：以「输入 」或「text 」开头，其后内容原样输入并回车。其他回复（如 yes、no、是、否）不会被执行。"
+    ),
     "done": "引用回复本消息，内容会作为新提示词发送。",
 }
 
@@ -38,12 +44,21 @@ def tail_screen(raw: str, lines: int) -> str:
     return text
 
 
-def render_notification(n: Notification, screen: str, lines: int) -> Outbound:
+def screen_digest(raw: str) -> str:
+    tail = "\n".join(_compact(raw)[-DIGEST_LINES:])
+    return hashlib.sha256(tail.encode()).hexdigest()
+
+
+def render_notification(
+    n: Notification, screen: str, lines: int, note: str | None = None
+) -> Outbound:
     s = n.snapshot
     header = (
         f"[{s.workspace_label}] {s.display_name} ({s.agent})\n"
         f"{NEEDS[n.kind]}"
     )
+    if note:
+        header = f"{note}\n{header}"
     return Outbound(
         title=f"{s.display_name}：{NEEDS[n.kind]}",
         text=header,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal, Mapping
 
 AgentStatus = Literal["idle", "working", "blocked", "done", "unknown"]
@@ -10,7 +10,7 @@ STATUSES: tuple[AgentStatus, ...] = ("idle", "working", "blocked", "done", "unkn
 
 MESSAGE_MAP_CAP = 200
 SEEN_EVENTS_CAP = 500
-MAX_PAIR_FAILURES = 5
+NOTIFY_RETRY_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,9 @@ class Config:
     done_delay_seconds: float = 60.0
     screen_lines: int = 40
     read_lines: int = 40
+    shortcut_minutes: float = 30.0
+    max_inbound_age_seconds: float = 120.0
+    prune_after_seconds: float = 600.0
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,7 @@ class AgentSnapshot:
     workspace_label: str
     agent: str
     status: AgentStatus
-    completion_seq: int
+    completion_seq: int | None
     state_change_seq: int
     name: str | None
     cwd: str
@@ -39,7 +42,7 @@ class AgentSnapshot:
     def display_name(self) -> str:
         return self.name or f"{self.agent} {self.pane_id}"
 
-    def seq_for(self, kind: AttentionKind) -> int:
+    def seq_for(self, kind: AttentionKind) -> int | None:
         return self.state_change_seq if kind == "blocked" else self.completion_seq
 
 
@@ -56,6 +59,8 @@ class MessageRef:
     terminal_id: str
     kind: AttentionKind
     seq: int
+    digest: str | None = None
+    sent_at: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -67,10 +72,6 @@ class Notification:
 
 @dataclass(frozen=True)
 class State:
-    owner_open_id: str | None = None
-    pairing_code: str | None = None
-    pair_failures: int = 0
-    baselined: bool = False
     pending: Mapping[tuple[str, AttentionKind], Attention] = field(
         default_factory=dict[tuple[str, AttentionKind], Attention]
     )
@@ -78,6 +79,7 @@ class State:
         default_factory=dict[str, Mapping[AttentionKind, int]]
     )
     messages: Mapping[str, MessageRef] = field(default_factory=dict[str, MessageRef])
+    last_seen: Mapping[str, float] = field(default_factory=dict[str, float])
     seen_events: tuple[str, ...] = ()
 
 
@@ -90,6 +92,7 @@ class Inbound:
     text: str
     parent_id: str | None = None
     root_id: str | None = None
+    created_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -110,13 +113,14 @@ class Prompt:
 class Keys:
     pane_id: str
     keys: tuple[str, ...]
+    expect_digest: str
 
 
 @dataclass(frozen=True)
 class Text:
     pane_id: str
     text: str
-    then_enter: bool
+    expect_digest: str
 
 
 @dataclass(frozen=True)
@@ -139,22 +143,15 @@ class Ignore:
 Action = Prompt | Keys | Text | Read | Reply | Ignore
 
 
-def record_sent(state: State, n: Notification, message_id: str) -> State:
+def record_sent(
+    state: State, n: Notification, message_id: str, digest: str | None, now: float
+) -> State:
     notified: dict[str, dict[AttentionKind, int]] = {
         t: dict(k) for t, k in state.notified.items()
     }
     notified.setdefault(n.snapshot.terminal_id, {})[n.kind] = n.seq
     messages: dict[str, MessageRef] = dict(state.messages)
-    messages[message_id] = MessageRef(n.snapshot.terminal_id, n.kind, n.seq)
+    messages[message_id] = MessageRef(n.snapshot.terminal_id, n.kind, n.seq, digest, now)
     while len(messages) > MESSAGE_MAP_CAP:
         del messages[next(iter(messages))]
-    return State(
-        owner_open_id=state.owner_open_id,
-        pairing_code=state.pairing_code,
-        pair_failures=state.pair_failures,
-        baselined=state.baselined,
-        pending=state.pending,
-        notified=notified,
-        messages=messages,
-        seen_events=state.seen_events,
-    )
+    return replace(state, notified=notified, messages=messages)

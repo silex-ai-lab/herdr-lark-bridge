@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Sequence
 
 from herdr_lark.herdr import HerdrError
+from herdr_lark.lark import LarkError
 from herdr_lark.models import AgentSnapshot, AgentStatus, Outbound
 
 
@@ -13,7 +14,7 @@ def snap(
     ws: str = "w1",
     pane: str | None = None,
     name: str | None = "alpha",
-    completion_seq: int = 1,
+    completion_seq: int | None = 1,
     state_change_seq: int = 1,
 ) -> AgentSnapshot:
     return AgentSnapshot(
@@ -30,7 +31,7 @@ def snap(
     )
 
 
-def with_status(s: AgentSnapshot, status: AgentStatus, **kw: int) -> AgentSnapshot:
+def with_status(s: AgentSnapshot, status: AgentStatus, **kw: int | None) -> AgentSnapshot:
     return replace(s, status=status, **kw)
 
 
@@ -63,8 +64,13 @@ class FakeLark:
     def __init__(self) -> None:
         self.sent: list[tuple[str, Outbound]] = []
         self.replies: list[tuple[str, Outbound]] = []
+        self.fail_sends = False
+        self.send_attempts = 0
 
     def send_to_user(self, open_id: str, out: Outbound) -> str:
+        self.send_attempts += 1
+        if self.fail_sends:
+            raise LarkError("boom")
         self.sent.append((open_id, out))
         return f"om_sent_{len(self.sent)}"
 

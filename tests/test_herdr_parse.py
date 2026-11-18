@@ -40,7 +40,7 @@ def test_tail_screen_trims_padding_and_keeps_last_lines():
     raw = (FIX / "agent_read.txt").read_text()
     assert not tail_screen(raw, 40).endswith("\n")
     assert tail_screen("a\nb\nc\n\n\n", 2) == "b\nc"
-    assert len(tail_screen("x" * 50_000, 40)) < 20_100
+    assert len(tail_screen("x" * 50_000, 40)) < 8_100
 
 
 def test_tail_screen_keeps_answer_above_a_blank_gap():

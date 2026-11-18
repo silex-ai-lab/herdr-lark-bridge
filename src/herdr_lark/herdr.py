@@ -5,7 +5,7 @@ import logging
 import os
 import shutil
 import subprocess
-from typing import Any, Protocol, Sequence, cast
+from typing import Any, Callable, Protocol, Sequence, cast
 
 from .models import STATUSES, AgentSnapshot, AgentStatus
 
@@ -26,6 +26,10 @@ class HerdrPort(Protocol):
     def send_text(self, pane_id: str, text: str) -> None: ...
 
 
+def _optional_int(v: Any) -> int | None:
+    return None if v is None else int(v)
+
+
 def parse_agent_list(raw: str, labels: dict[str, str]) -> list[AgentSnapshot]:
     try:
         agents = json.loads(raw)["result"]["agents"]
@@ -44,7 +48,7 @@ def parse_agent_list(raw: str, labels: dict[str, str]) -> list[AgentSnapshot]:
                     workspace_label=labels.get(a["workspace_id"]) or a["workspace_id"],
                     agent=a.get("agent", "agent"),
                     status=status,
-                    completion_seq=int(a.get("completion_seq", 0)),
+                    completion_seq=_optional_int(a.get("completion_seq")),
                     state_change_seq=int(a.get("state_change_seq", 0)),
                     name=a.get("name") or None,
                     cwd=a.get("cwd", ""),
@@ -73,16 +77,14 @@ def find_binary() -> str:
     raise HerdrError("herdr binary not found on PATH or at ~/.local/bin/herdr")
 
 
-class HerdrCli:
-    def __init__(self, binary: str | None = None, timeout: float = 15.0) -> None:
-        self._binary = binary
-        self._timeout = timeout
+Runner = Callable[[tuple[str, ...]], str]
 
-    def _run(self, *args: str) -> str:
-        binary = self._binary or find_binary()
+
+def subprocess_runner(binary: str | None, timeout: float) -> Runner:
+    def run(args: tuple[str, ...]) -> str:
         try:
             p = subprocess.run(
-                [binary, *args], capture_output=True, text=True, timeout=self._timeout
+                [binary or find_binary(), *args], capture_output=True, text=True, timeout=timeout
             )
         except (OSError, subprocess.TimeoutExpired) as e:
             raise HerdrError(f"herdr {' '.join(args[:2])} failed: {e}") from e
@@ -91,26 +93,35 @@ class HerdrCli:
             raise HerdrError(f"herdr {' '.join(args[:2])} exited {p.returncode}: {detail}")
         return p.stdout
 
+    return run
+
+
+class HerdrCli:
+    def __init__(
+        self, binary: str | None = None, timeout: float = 15.0, runner: Runner | None = None
+    ) -> None:
+        self._run: Runner = runner or subprocess_runner(binary, timeout)
+
     def list_agents(self) -> list[AgentSnapshot]:
-        agents_raw = self._run("agent", "list")
+        agents_raw = self._run(("agent", "list"))
         try:
-            labels = parse_workspace_labels(self._run("workspace", "list"))
+            labels = parse_workspace_labels(self._run(("workspace", "list")))
         except HerdrError as e:
             log.warning("workspace labels unavailable: %s", e)
             labels = {}
         return parse_agent_list(agents_raw, labels)
 
     def read(self, pane_id: str, lines: int) -> str:
-        return self._run(
+        return self._run((
             "agent", "read", pane_id, "--source", "recent",
             "--lines", str(lines), "--format", "text",
-        )
+        ))
 
     def prompt(self, pane_id: str, text: str) -> None:
-        self._run("agent", "prompt", pane_id, text)
+        self._run(("agent", "prompt", pane_id, text))
 
     def send_keys(self, pane_id: str, keys: Sequence[str]) -> None:
-        self._run("agent", "send-keys", pane_id, *keys)
+        self._run(("agent", "send-keys", pane_id, *keys))
 
     def send_text(self, pane_id: str, text: str) -> None:
-        self._run("pane", "send-text", pane_id, text)
+        self._run(("pane", "send-text", pane_id, text))

@@ -14,6 +14,7 @@ from lark_oapi.api.im.v1 import (  # pyright: ignore[reportMissingTypeStubs]
 )
 
 from .models import Inbound, Outbound
+from .watchdog import DisconnectWatchdog, start_watchdog
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,15 @@ def build_post(out: Outbound) -> str:
     if out.footer:
         rows.append([{"tag": "text", "text": out.footer}])
     return json.dumps({"zh_cn": {"title": out.title or "", "content": rows}}, ensure_ascii=False)
+
+
+def _create_time_seconds(raw: object) -> float | None:
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        return None
+    try:
+        return int(raw) / 1000.0
+    except ValueError:
+        return None
 
 
 def parse_event(data: P2ImMessageReceiveV1) -> Inbound | None:
@@ -59,7 +69,12 @@ def parse_event(data: P2ImMessageReceiveV1) -> Inbound | None:
         text=text,
         parent_id=msg.parent_id or None,
         root_id=msg.root_id or None,
+        created_at=_create_time_seconds(msg.create_time),
     )
+
+
+def ws_connected(ws: lark.ws.Client) -> bool:
+    return ws._conn is not None  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType]
 
 
 class LarkClient:
@@ -71,6 +86,7 @@ class LarkClient:
             .app_id(app_id)
             .app_secret(app_secret)
             .domain(lark.LARK_DOMAIN)
+            .log_level(lark.LogLevel.WARNING)
             .build()
         )
         assert client.im is not None
@@ -129,6 +145,7 @@ class LarkClient:
             self._app_secret,
             event_handler=dispatcher,
             domain=lark.LARK_DOMAIN,
-            log_level=lark.LogLevel.INFO,
+            log_level=lark.LogLevel.WARNING,
         )
+        start_watchdog(DisconnectWatchdog(lambda: ws_connected(ws)))
         ws.start()
