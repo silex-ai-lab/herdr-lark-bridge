@@ -73,10 +73,6 @@ def find_binary() -> str:
     raise HerdrError("herdr binary not found on PATH or at ~/.local/bin/herdr")
 
 
-def _literal(text: str) -> tuple[str, ...]:
-    return ("--", text) if text.startswith("-") else (text,)
-
-
 class HerdrCli:
     def __init__(self, binary: str | None = None, timeout: float = 15.0) -> None:
         self._binary = binary
@@ -111,10 +107,10 @@ class HerdrCli:
         )
 
     def prompt(self, pane_id: str, text: str) -> None:
-        self._run("agent", "prompt", pane_id, *_literal(text))
+        self._run("agent", "prompt", pane_id, text)
 
     def send_keys(self, pane_id: str, keys: Sequence[str]) -> None:
         self._run("agent", "send-keys", pane_id, *keys)
 
     def send_text(self, pane_id: str, text: str) -> None:
-        self._run("pane", "send-text", pane_id, *_literal(text))
+        self._run("pane", "send-text", pane_id, text)
