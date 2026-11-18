@@ -6,7 +6,8 @@ import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from .models import Config
+from .fsio import atomic_write
+from .models import DOMAINS, LANGS, Config, Domain, Lang
 
 
 class ConfigError(Exception):
@@ -42,6 +43,9 @@ def load_config(path: Path | None = None) -> Config:
     unknown = set(data) - set(allowed)
     if unknown:
         raise ConfigError(f"{path}: unknown keys {sorted(unknown)}; allowed {allowed}")
+    lang = data.pop("lang", None)
+    if lang is not None and lang not in LANGS:
+        raise ConfigError(f"{path}: lang must be one of {list(LANGS)}")
     for k, v in data.items():
         if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
             raise ConfigError(f"{path}: {k} must be a non-negative number")
@@ -57,22 +61,52 @@ def load_config(path: Path | None = None) -> Config:
             data.get("max_inbound_age_seconds", d.max_inbound_age_seconds)
         ),
         prune_after_seconds=float(data.get("prune_after_seconds", d.prune_after_seconds)),
+        lang=parse_lang(lang) if lang is not None else d.lang,
     )
+
+
+def parse_lang(raw: str) -> Lang:
+    for lang in LANGS:
+        if raw == lang:
+            return lang
+    raise ConfigError(f"lang must be one of {list(LANGS)}, got {raw!r}")
+
+
+def parse_domain(raw: str) -> Domain:
+    for domain in DOMAINS:
+        if raw == domain:
+            return domain
+    raise ConfigError(f"LARK_DOMAIN must be one of {list(DOMAINS)}, got {raw!r}")
 
 
 @dataclass(frozen=True)
 class Credentials:
     app_id: str
     app_secret: str
+    domain: Domain = "lark"
+
+
+def credentials_path() -> Path:
+    return config_dir() / "credentials.env"
+
+
+def write_credentials(creds: Credentials, path: Path | None = None) -> Path:
+    path = path or credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    atomic_write(
+        path,
+        f"LARK_DOMAIN={creds.domain}\nLARK_APP_ID={creds.app_id}\nLARK_APP_SECRET={creds.app_secret}\n",
+    )
+    return path
 
 
 def load_credentials(path: Path | None = None) -> Credentials:
-    path = path or config_dir() / "credentials.env"
+    path = path or credentials_path()
     try:
         st = path.stat()
     except FileNotFoundError:
         raise ConfigError(
-            f"{path} not found. Create it with LARK_APP_ID and LARK_APP_SECRET and chmod 600."
+            f"{path} not found. Run `herdr-lark setup`."
         ) from None
     if st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
         raise ConfigError(
@@ -88,4 +122,6 @@ def load_credentials(path: Path | None = None) -> Credentials:
     missing = [k for k in ("LARK_APP_ID", "LARK_APP_SECRET") if not env.get(k)]
     if missing:
         raise ConfigError(f"{path} is missing {', '.join(missing)}")
-    return Credentials(env["LARK_APP_ID"], env["LARK_APP_SECRET"])
+    return Credentials(
+        env["LARK_APP_ID"], env["LARK_APP_SECRET"], parse_domain(env.get("LARK_DOMAIN", "lark"))
+    )

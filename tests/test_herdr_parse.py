@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from herdr_lark.herdr import HerdrError, parse_agent_list
+from herdr_lark.messages import ZH
 from herdr_lark.render import tail_screen
 
 FIX = Path(__file__).parent / "fixtures"
@@ -38,14 +39,14 @@ def test_unknown_status_maps_to_unknown():
 
 def test_tail_screen_trims_padding_and_keeps_last_lines():
     raw = (FIX / "agent_read.txt").read_text()
-    assert not tail_screen(raw, 40).endswith("\n")
-    assert tail_screen("a\nb\nc\n\n\n", 2) == "b\nc"
-    assert len(tail_screen("x" * 50_000, 40)) < 8_100
+    assert not tail_screen(raw, 40, ZH).endswith("\n")
+    assert tail_screen("a\nb\nc\n\n\n", 2, ZH) == "b\nc"
+    assert len(tail_screen("x" * 50_000, 40, ZH)) < 8_100
 
 
 def test_tail_screen_keeps_answer_above_a_blank_gap():
     from herdr_lark.render import tail_screen
 
     raw = "⏺ READY-1\n" + "\n" * 45 + "─" * 200 + "\n❯\n" + "─" * 200 + "\n\n  status\n"
-    out = tail_screen(raw, 8)
+    out = tail_screen(raw, 8, ZH)
     assert out.splitlines() == ["⏺ READY-1", "", "─" * 24, "❯", "─" * 24, "", "  status"]

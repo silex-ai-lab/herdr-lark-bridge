@@ -80,3 +80,31 @@ class FakeLark:
     def reply(self, message_id: str, out: Outbound) -> str:
         self.replies.append((message_id, out))
         return f"om_reply_{len(self.replies)}"
+
+
+class FakeLarkApi(FakeLark):
+    def __init__(self, error: str | None = None) -> None:
+        super().__init__()
+        self.error = error
+        self.checks = 0
+
+    def check_credentials(self) -> None:
+        self.checks += 1
+        if self.error:
+            raise LarkError(self.error)
+
+
+class FakeLaunchctl:
+    def __init__(self, print_output: str = "", print_code: int = 0) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.print_output = print_output
+        self.print_code = print_code
+        self.bootstrap_code = 0
+
+    def __call__(self, args: Sequence[str]) -> tuple[int, str]:
+        self.calls.append(tuple(args))
+        if args[0] == "print":
+            return self.print_code, self.print_output
+        if args[0] == "bootstrap":
+            return self.bootstrap_code, "" if self.bootstrap_code == 0 else "boom"
+        return 0, ""

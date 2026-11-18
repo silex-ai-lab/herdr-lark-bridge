@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Callable, Protocol
+import os
+import urllib.error
+import urllib.request
+from typing import Callable, Protocol, cast
 
 import lark_oapi as lark  # pyright: ignore[reportMissingTypeStubs]
 from lark_oapi.api.im.v1 import (  # pyright: ignore[reportMissingTypeStubs]
@@ -13,7 +16,7 @@ from lark_oapi.api.im.v1 import (  # pyright: ignore[reportMissingTypeStubs]
     ReplyMessageRequestBody,
 )
 
-from .models import Inbound, Outbound
+from .models import Domain, Inbound, Outbound
 from .watchdog import DisconnectWatchdog, start_watchdog
 
 log = logging.getLogger(__name__)
@@ -26,6 +29,40 @@ class LarkError(Exception):
 class LarkTransport(Protocol):
     def send_to_user(self, open_id: str, out: Outbound) -> str: ...
     def reply(self, message_id: str, out: Outbound) -> str: ...
+
+
+class LarkApi(LarkTransport, Protocol):
+    def check_credentials(self) -> None: ...
+
+
+DOMAIN_BASES: dict[Domain, str] = {"lark": lark.LARK_DOMAIN, "feishu": lark.FEISHU_DOMAIN}
+TOKEN_PATH = "/open-apis/auth/v3/tenant_access_token/internal"
+TOKEN_TIMEOUT_SECONDS = 10.0
+
+
+def api_base(domain: Domain) -> str:
+    return os.environ.get("HERDR_LARK_API_BASE") or DOMAIN_BASES[domain]
+
+
+def fetch_tenant_token(base: str, app_id: str, app_secret: str) -> None:
+    req = urllib.request.Request(
+        base + TOKEN_PATH,
+        data=json.dumps({"app_id": app_id, "app_secret": app_secret}).encode(),
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=TOKEN_TIMEOUT_SECONDS) as resp:
+            body = resp.read()
+    except urllib.error.HTTPError as e:
+        body = e.read()
+    except (OSError, ValueError) as e:
+        raise LarkError(f"cannot reach {base}: {e}") from e
+    try:
+        data = cast(dict[str, object], json.loads(body))
+    except ValueError as e:
+        raise LarkError(f"unexpected response from {base}") from e
+    if data.get("code") != 0 or not data.get("tenant_access_token"):
+        raise LarkError(f"code={data.get('code')} msg={data.get('msg')}")
 
 
 def build_post(out: Outbound) -> str:
@@ -78,19 +115,23 @@ def ws_connected(ws: lark.ws.Client) -> bool:
 
 
 class LarkClient:
-    def __init__(self, app_id: str, app_secret: str) -> None:
+    def __init__(self, app_id: str, app_secret: str, domain: Domain = "lark") -> None:
         self._app_id = app_id
         self._app_secret = app_secret
+        self._base = api_base(domain)
         client = (
             lark.Client.builder()
             .app_id(app_id)
             .app_secret(app_secret)
-            .domain(lark.LARK_DOMAIN)
+            .domain(self._base)
             .log_level(lark.LogLevel.WARNING)
             .build()
         )
         assert client.im is not None
         self._messages = client.im.v1.message
+
+    def check_credentials(self) -> None:
+        fetch_tenant_token(self._base, self._app_id, self._app_secret)
 
     def send_to_user(self, open_id: str, out: Outbound) -> str:
         req = (
@@ -144,7 +185,7 @@ class LarkClient:
             self._app_id,
             self._app_secret,
             event_handler=dispatcher,
-            domain=lark.LARK_DOMAIN,
+            domain=self._base,
             log_level=lark.LogLevel.WARNING,
         )
         start_watchdog(DisconnectWatchdog(lambda: ws_connected(ws)))

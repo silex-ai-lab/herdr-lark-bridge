@@ -5,6 +5,10 @@ from typing import Literal, Mapping
 
 AgentStatus = Literal["idle", "working", "blocked", "done", "unknown"]
 AttentionKind = Literal["blocked", "done"]
+Lang = Literal["zh", "en"]
+LANGS: tuple[Lang, ...] = ("zh", "en")
+Domain = Literal["lark", "feishu"]
+DOMAINS: tuple[Domain, ...] = ("lark", "feishu")
 
 STATUSES: tuple[AgentStatus, ...] = ("idle", "working", "blocked", "done", "unknown")
 
@@ -23,6 +27,7 @@ class Config:
     shortcut_minutes: float = 30.0
     max_inbound_age_seconds: float = 120.0
     prune_after_seconds: float = 600.0
+    lang: Lang = "zh"
 
 
 @dataclass(frozen=True)

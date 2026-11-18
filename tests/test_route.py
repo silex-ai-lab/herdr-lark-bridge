@@ -16,7 +16,8 @@ from herdr_lark.models import (
     State,
     Text,
 )
-from herdr_lark.route import BLOCKED_USAGE, admit, owner_action
+from herdr_lark.messages import ZH
+from herdr_lark.route import admit, owner_action
 
 from helpers import snap
 
@@ -148,7 +149,7 @@ def test_blocked_key_tokens_are_sent_as_keys_case_insensitively():
 def test_blocked_target_refuses_anything_that_is_not_keys_or_prefixed_text(text: str):
     st, snaps = blocked_state()
     _, act = route(msg(text, parent="om_n1"), st, snaps)
-    assert act == Reply(BLOCKED_USAGE)
+    assert act == Reply(ZH.blocked_usage)
 
 
 @pytest.mark.parametrize("text, typed", [
