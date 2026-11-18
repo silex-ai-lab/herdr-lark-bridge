@@ -2,14 +2,14 @@
 
 [中文说明](README.zh-CN.md)
 
-Get a Lark DM when a [Herdr](https://herdr.dev) agent is blocked on an approval or has finished a round. Quote-reply to the DM and your answer goes into that agent's pane as key presses or a prompt.
+Get a Lark DM when a Herdr agent is blocked on an approval or has finished a round. Quote-reply to the DM and your answer goes into that agent's pane as key presses or a prompt.
 
 There is no LLM in the loop. Routing is deterministic, only the paired owner is obeyed, and approvals are key-only.
 
 ## Requirements
 
 - macOS for the background service. Linux should work in the foreground but is untested.
-- [herdr](https://herdr.dev) 0.9.3 or newer (the version this was tested with), running.
+- herdr 0.9.3 or newer (the version this was tested with), running.
 - [uv](https://docs.astral.sh/uv/) and Python 3.12 or newer (uv installs Python for you).
 - A Lark account on the international Lark. Feishu (China) is supported by a setting but untested.
 
