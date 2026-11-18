@@ -1,78 +1,143 @@
 # herdr-lark-bridge
 
-A small daemon that connects Herdr agents to a Lark bot. When an agent waits for approval or finishes a round, the bot DMs you the screen tail. Your reply goes straight into that agent's pane. No LLM is involved. Routing is deterministic.
+[中文说明](README.zh-CN.md)
 
-## Lark app requirements
+Get a Lark DM when a [Herdr](https://herdr.dev) agent is blocked on an approval or has finished a round. Quote-reply to the DM and your answer goes into that agent's pane as key presses or a prompt.
 
-Create a custom app on the international Lark Developer Console (open.larksuite.com), then:
+There is no LLM in the loop. Routing is deterministic, only the paired owner is obeyed, and approvals are key-only.
 
-- Enable the **Bot** capability.
-- Add scopes `im:message.p2p_msg:readonly` and `im:message:send_as_bot`.
-- Under Events, use **persistent connection** (long connection) and subscribe to `im.message.receive_v1`.
-- Publish a version so the scopes and event take effect.
+## Requirements
 
-## Setup
+- macOS for the background service. Linux should work in the foreground but is untested.
+- [herdr](https://herdr.dev) 0.9.3 or newer (the version this was tested with), running.
+- [uv](https://docs.astral.sh/uv/) and Python 3.12 or newer (uv installs Python for you).
+- A Lark account on the international Lark. Feishu (China) is supported by a setting but untested.
+
+## Quickstart
+
+1. **Create the Lark app.** Open [open.larksuite.com/app](https://open.larksuite.com/app) (Feishu China: [open.feishu.cn/app](https://open.feishu.cn/app)), use the **Built for agents** Create button, and create the app. It preconfigures the bot, the persistent-connection event and the scopes, and publishes the app. Copy the App ID and App Secret from its credentials page.
+2. **Install.**
+   ```
+   uv tool install git+https://github.com/silex-ai-lab/herdr-lark-bridge
+   ```
+3. **Set up.**
+   ```
+   herdr-lark setup
+   ```
+   It asks for the domain, App ID and App Secret (hidden), saves them with mode 0600, checks them against Lark, offers to install the background service, and prints a 6-digit pairing code.
+4. **DM the code.** In Lark, open a direct chat with your bot and send the 6-digit code within 10 minutes. The bot replies "Paired". You are now the only owner.
+5. **Done.** Run `herdr-lark send-test` for a test message, or let an agent block. If anything looks off, run `herdr-lark doctor`.
+
+`herdr-lark setup` is safe to rerun. It keeps saved values when you press Enter, and it does not arm pairing again while an owner exists.
+
+### Scripted setup
 
 ```
-mkdir -p ~/.config/herdr-lark
-printf 'LARK_APP_ID=cli_xxx\nLARK_APP_SECRET=xxx\n' > ~/.config/herdr-lark/credentials.env
-chmod 600 ~/.config/herdr-lark/credentials.env
-uv sync
-uv run herdr-lark run          # or: scripts/install-launchd.sh
-uv run herdr-lark pair         # prints a 6-digit code, valid 10 minutes
+LARK_APP_SECRET=... herdr-lark setup --non-interactive --domain lark --app-id cli_xxx --service
 ```
 
-DM the bot the 6-digit code. Its sender becomes the only owner. Every other sender is ignored, because inbound text becomes keystrokes in your terminals. The daemon refuses to start when `credentials.env` is readable by group or others.
+The secret is read from `LARK_APP_SECRET` or, with `--app-secret-stdin`, from one line of stdin. `LARK_APP_ID` and `LARK_DOMAIN` work as env vars too. Use `--no-service` to skip the service.
 
-Pairing is armed locally and never by the daemon. `herdr-lark pair` writes `~/.config/herdr-lark/pairing.json` (mode 0600) with the code and its expiry. The daemon accepts a pairing DM only while that file exists and has not expired, only in a p2p chat, and only while no owner exists. The file is deleted on success, on expiry and after 5 wrong codes. Nothing re-arms it. `herdr-lark pair` refuses while an owner exists.
+## What you get
 
-The owner lives in `~/.config/herdr-lark/owner` (one line, mode 0600), not in `state.json`. `herdr-lark unpair` deletes it, and a running daemon notices on its next tick or message. `owner_open_id`, `pairing_code` and `pair_failures` left in an old `state.json` are ignored and disappear on the next save.
+- **Blocked.** Sent after the agent stays blocked for `blocked_delay_seconds`. It carries the visible screen tail.
+- **Done.** Sent after `done_delay_seconds`, only for a new completion, and only when no other agent in the same workspace is still working. An agent first seen already done is recorded and not announced.
 
-`scripts/install-launchd.sh` writes `~/Library/LaunchAgents/com.user.herdr-lark-bridge.plist` and loads it (KeepAlive, logs in `~/Library/Logs/herdr-lark/`). `--dry-run` prints the rendered plist instead.
+## Reply rules
 
-## When you get a message
+Quote-reply to a notification to act on its agent.
 
-- **Blocked** (等待审批): sent after the agent stays blocked for `blocked_delay_seconds` (default 20).
-- **Done** (已完成): sent after `done_delay_seconds` (default 60), only when a new `completion_seq` appears (greater than the last notified one), and only when no agent in the same workspace is still working. A terminal first seen while already done is recorded as notified and not announced. A done agent without `completion_seq` is skipped with one warning.
+| Target | Reply | Effect |
+| --- | --- | --- |
+| Blocked | Key names only, space separated (`y n 0-9 enter esc tab up down left right space`), for example `1` or `down down enter` | Sent as key presses |
+| Blocked | `text <words>` or `输入 <words>` (case-insensitive prefix) | Types the words as-is and presses Enter |
+| Blocked | Anything else, including `yes`, `no`, `y.` | Nothing is sent, the bot explains the two forms |
+| Blocked | A quoted `/command` | Runs as a command, never typed |
+| Done | Any text | Sent as a new prompt. A quoted `/compact` stays literal text |
+| Either | Plain DM without quoting | Acts on the only outstanding notification, if exactly one exists and it is at most `shortcut_minutes` old. Otherwise the bot lists them |
 
-Quote-reply to a message to act on its agent.
+Both prefixes work whatever `lang` is set to. Right before keys or text are sent, the pane is read again and compared with a digest of the notified screen. If it differs, nothing is sent and the bot posts the fresh screen as a new notification. If the agent state changed, nothing is sent. A message older than `max_inbound_age_seconds` is refused.
 
-- **Blocked target.** Only two forms are accepted. A reply made only of key names (`0-9 y n enter esc tab up down left right space`, space separated, for example `1` or `down down enter`) is sent as key presses. A reply that starts with `输入 ` or `text ` (case-insensitive) types the rest literally and presses Enter. Anything else, including `yes`, `no`, `是`, `否`, `不要` and `y.`, sends nothing and the bot explains the two forms. A quoted `/command` runs as a command and is never typed.
-- **Blocked target, same dialog check.** The notification stores a digest of the last 15 compacted screen lines. Right before keys or text are sent, the pane is read again. If the digest differs, nothing is sent and the bot posts the fresh screen as a new notification, which you can quote-reply. A screen that changes on its own (a clock, a spinner in the last 15 lines) causes a refusal and a fresh notification, never a wrong send.
-- **Done target.** The text is sent as a new prompt. A quoted `/compact` stays literal text.
-- If the agent state changed since the notification, nothing is sent and the bot says 状态已变化.
-- **Plain DM without quoting** acts on the only outstanding notification, and only when exactly one is outstanding and it was sent within `shortcut_minutes` (default 30). Otherwise the bot lists the outstanding ones.
-- **Late messages.** A message whose Lark create time is more than `max_inbound_age_seconds` (default 120) old when it arrives, missing, or older than the notification it would act on, is not executed and the bot says so.
-- Text that starts with `--` is safe. Verified against the installed herdr: `agent prompt <target> <text>` takes the first argument after the target as the text even when it looks like an option, and `pane send-text` takes its argument literally. The bridge always passes the text as one argument right after the target. `tests/test_herdr_cli.py` asserts the argv and probes the real binary against a nonexistent target.
+## Commands
 
-Commands (plain DMs): `/list`, `/read <n|name>`, `/to <n|name> <text>`, `/help`.
+In Lark (plain DMs): `/list`, `/read <n|name>`, `/to <n|name> <text>`, `/help`.
 
-## Config
+In the terminal:
 
-`~/.config/herdr-lark/config.toml` is optional. Keys: `poll_seconds` (3), `blocked_delay_seconds` (20), `done_delay_seconds` (60), `screen_lines` (40), `read_lines` (40), `shortcut_minutes` (30), `max_inbound_age_seconds` (120), `prune_after_seconds` (600). State lives in `~/.local/state/herdr-lark/state.json` (directory 0700, file 0600, fsync before rename). A missing state file starts fresh. A corrupt one is moved to `state.json.corrupt-<unix ts>` and the daemon starts fresh. `HERDR_LARK_CONFIG_DIR` and `HERDR_LARK_STATE_DIR` override both directories.
+| Command | Does |
+| --- | --- |
+| `herdr-lark setup` | Credentials, verification, service, pairing |
+| `herdr-lark doctor` | Checks the whole install, one line per check, exit 1 on failure |
+| `herdr-lark service install \| uninstall \| status` | Manage the launchd service. `install --dry-run` prints the plist |
+| `herdr-lark run` | Run in the foreground |
+| `herdr-lark pair` / `unpair` | Arm a pairing code / forget the owner |
+| `herdr-lark status` | Owner, tracked state, live agents |
+| `herdr-lark send-test` | Send a test DM to the owner |
 
-Dedup state for a terminal is dropped only after it has been absent from `agent list` for `prune_after_seconds`, so one empty or partial listing does not cause re-notification.
+## Configuration
 
-## Other commands
+Files live in `~/.config/herdr-lark/`. State lives in `~/.local/state/herdr-lark/state.json`. `HERDR_LARK_CONFIG_DIR` and `HERDR_LARK_STATE_DIR` override the directories.
 
-`herdr-lark status` shows the owner, tracked state and live agents. `herdr-lark send-test` sends a test message to the owner. `herdr-lark pair` and `herdr-lark unpair` manage the owner.
+`credentials.env` (written by `setup`, must be mode 0600): `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_DOMAIN` (`lark` or `feishu`, default `lark`).
+
+`config.toml` is optional:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `lang` | `"zh"` | Language of every message sent to Lark: `"zh"` or `"en"` |
+| `poll_seconds` | 3 | Herdr polling interval |
+| `blocked_delay_seconds` | 20 | Wait before a blocked notification |
+| `done_delay_seconds` | 60 | Wait before a done notification |
+| `screen_lines` | 40 | Screen lines per notification |
+| `read_lines` | 40 | Lines for `/read` |
+| `shortcut_minutes` | 30 | Age limit for replies without quoting |
+| `max_inbound_age_seconds` | 120 | Older inbound messages are refused |
+| `prune_after_seconds` | 600 | Dedup state is dropped after a terminal is absent this long |
+
+The service reads `config.toml` at start. Restart it with `herdr-lark service install` after editing.
+
+## Security model
+
+- **Owner lock.** Inbound text becomes keystrokes in your terminals, so only one Lark account is obeyed. Every other sender is ignored, and group chats are ignored.
+- **Local pairing.** Pairing is armed only on your machine by `herdr-lark setup` or `herdr-lark pair`. It writes a code with a 10 minute expiry. The daemon accepts a pairing DM only while that code is armed, only in a direct chat and only while no owner exists. The code is deleted on success, expiry and after 5 wrong tries. The owner is stored in `owner` (mode 0600).
+- **Key-only approvals.** A blocked agent accepts key names or an explicit `text`/`输入` prefix. Natural-language replies such as `yes` are never interpreted.
+- **Dialog digest.** Keys are sent only if the dialog on screen is still the one you were shown.
+- **Credentials.** The daemon refuses to start when `credentials.env` is readable by group or others.
+- **What goes to Lark.** For a blocked agent, the last `screen_lines` lines of its visible screen. For a done agent, the tail of its recent output. `/read` returns the same kind of tail. Each also carries the workspace label, agent name and agent type. Text is cut at 8000 characters. Anything visible in the pane, including secrets, is sent to Lark's servers and stays in the chat history. Your replies and Lark message ids pass through Lark too.
 
 ## Limits
 
-- A crash between sending a notification and saving state can send the same notification twice. This is accepted. The reverse order would risk a lost notification.
-- A crash after an inbound event is recorded and before its keys are sent drops that input. The event is not retried.
-- Typing text is two herdr calls (text, then Enter). The same-dialog check runs before the first.
-- The websocket watchdog exits the process (launchd restarts it) when the SDK client holds no connection for 300 seconds. The signal is the SDK's private `_conn` attribute, which is `None` after a failed reconnect leaves the client deaf. A connection object that is open but silently dead is not detected, because the SDK does not expose ping or pong state.
+- The background service is macOS (launchd) only. On other platforms `herdr-lark service` says so, and `herdr-lark run` works in the foreground. Linux and Feishu China are untested.
+- When the laptop sleeps, nothing is polled, so there are no notifications until it wakes.
+- A watchdog exits the process (launchd restarts it) when the Lark websocket holds no connection for 300 seconds. A connection that is open but silently dead is not detected.
+- A crash between sending a notification and saving state can send the same notification twice. The reverse order could lose one.
+- A crash after an inbound event is recorded and before its keys are sent drops that input.
 - A failed notification send is retried no sooner than 60 seconds later.
-- Blocked notifications saved by an older version have no screen digest, so quoted replies to them are refused until a new notification arrives.
 
-## Design notes
+## Troubleshooting
 
-Pure functions `decide` (what to notify) and `route` (what an inbound DM does) sit in the middle. Herdr and Lark are adapters behind small interfaces. One engine thread owns all state and consumes a queue. The poll ticker and the Lark websocket callback only enqueue.
+Run `herdr-lark doctor`. It checks the herdr binary and server, credentials and their mode, a live token fetch, the owner, the service and the last log lines, and prints a fix for each failure. Logs are in `~/Library/Logs/herdr-lark/`.
+
+| Symptom | Likely cause |
+| --- | --- |
+| `setup` fails the token check | Wrong App ID or Secret, wrong domain, or the app is not published |
+| Pairing code ignored | Expired, bot not running (`doctor` shows the service), or the DM was not a direct chat |
+| No notifications | Laptop asleep, herdr not running, or no owner yet |
+
+## Uninstall
+
+```
+herdr-lark service uninstall
+uv tool uninstall herdr-lark-bridge
+rm -r ~/.config/herdr-lark ~/.local/state/herdr-lark ~/Library/Logs/herdr-lark
+```
 
 ## Development
 
 ```
+uv sync
 uv run pytest
 uv run pyright
 ```
+
+Tests that need the real `herdr` binary skip when it is absent. Pure functions `decide` (what to notify) and `route` (what a DM does) sit in the middle, with Herdr and Lark as adapters behind small interfaces. One engine thread owns all state. User-facing strings live in `src/herdr_lark/messages.py`, one table per language.
