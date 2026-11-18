@@ -26,7 +26,7 @@ from .models import (
     Text,
     record_sent,
 )
-from .render import render_notification, tail_screen
+from .render import READ_FACTOR, render_notification, tail_screen
 from .route import route
 from .store import StateStore
 
@@ -81,7 +81,7 @@ class Engine:
                     log.info("no owner paired, holding %s notification for %s", n.kind, n.snapshot.display_name)
                 continue
             try:
-                screen = self._herdr.read(n.snapshot.pane_id, self._cfg.screen_lines)
+                screen = self._herdr.read(n.snapshot.pane_id, self._cfg.screen_lines * READ_FACTOR)
             except HerdrError as e:
                 screen = f"(无法读取屏幕：{e})"
             out = render_notification(n, screen, self._cfg.screen_lines)
@@ -126,7 +126,7 @@ class Engine:
                         self._herdr.send_keys(pane_id, ("enter",))
                     self._reply(inbound, Reply("已输入并回车。" if then_enter else "已输入。"))
                 case Read(pane_id, lines):
-                    screen = tail_screen(self._herdr.read(pane_id, lines), lines)
+                    screen = tail_screen(self._herdr.read(pane_id, lines * READ_FACTOR), lines)
                     self._reply(inbound, Reply("屏幕内容：", screen or "(屏幕为空)"))
                 case _:
                     assert_never(action)

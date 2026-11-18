@@ -12,11 +12,27 @@ HINTS = {
 }
 
 
-def tail_screen(raw: str, lines: int) -> str:
-    rows = [r.rstrip() for r in raw.splitlines()]
+RULE_CHARS = frozenset("─━═-_╌┄")
+RULE_WIDTH = 24
+READ_FACTOR = 5
+
+
+def _compact(raw: str) -> list[str]:
+    rows: list[str] = []
+    for r in (x.rstrip() for x in raw.splitlines()):
+        body = r.strip()
+        if len(body) > RULE_WIDTH and set(body) <= RULE_CHARS:
+            r = body[:RULE_WIDTH]
+        if not r and (not rows or not rows[-1]):
+            continue
+        rows.append(r)
     while rows and not rows[-1]:
         rows.pop()
-    text = "\n".join(rows[-lines:])
+    return rows
+
+
+def tail_screen(raw: str, lines: int) -> str:
+    text = "\n".join(_compact(raw)[-lines:])
     if len(text) > MAX_CODE_CHARS:
         text = "…(已截断)\n" + text[-MAX_CODE_CHARS:]
     return text
