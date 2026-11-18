@@ -67,7 +67,20 @@ def test_install_reports_bootstrap_failure(home: Path):
     lc = FakeLaunchctl()
     lc.bootstrap_code = 5
     with pytest.raises(service.ServiceError, match="boom"):
-        service.install(home, service.render_plist(home, "py", None, {}), lc)
+        service.install(home, service.render_plist(home, "py", None, {}), lc, sleep=lambda _: None)
+
+
+def test_install_retries_bootstrap_while_the_old_job_is_still_unloading(home: Path):
+    codes = iter([5, 5, 0])
+
+    class Slow(FakeLaunchctl):
+        def __call__(self, args):  # type: ignore[no-untyped-def]
+            code, out = super().__call__(args)
+            return (next(codes), "Input/output error") if args[0] == "bootstrap" else (code, out)
+
+    lc = Slow()
+    service.install(home, service.render_plist(home, "py", None, {}), lc, sleep=lambda _: None)
+    assert [c[0] for c in lc.calls] == ["bootout", "bootstrap", "bootstrap", "bootstrap", "kickstart"]
 
 
 def test_uninstall_is_idempotent(home: Path):

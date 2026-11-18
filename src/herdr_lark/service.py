@@ -4,6 +4,7 @@ import os
 import plistlib
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, Sequence
@@ -88,14 +89,29 @@ def _domain() -> str:
     return f"gui/{os.getuid()}"
 
 
-def install(home: Path, plist: bytes, launchctl: Launchctl) -> None:
+BOOTSTRAP_ATTEMPTS = 10
+
+
+def install(
+    home: Path,
+    plist: bytes,
+    launchctl: Launchctl,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
     target = plist_path(home)
     log_dir(home).mkdir(parents=True, exist_ok=True)
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(target, plist.decode(), mode=0o644)
     launchctl(("bootout", f"{_domain()}/{LABEL}"))
-    code, out = launchctl(("bootstrap", _domain(), str(target)))
-    if code != 0:
+    # bootout returns before launchd has dropped the old job, and bootstrap fails with EIO until it has
+    out = ""
+    for attempt in range(BOOTSTRAP_ATTEMPTS):
+        code, out = launchctl(("bootstrap", _domain(), str(target)))
+        if code == 0:
+            break
+        if attempt + 1 < BOOTSTRAP_ATTEMPTS:
+            sleep(0.5)
+    else:
         raise ServiceError(f"launchctl bootstrap failed: {out}")
     launchctl(("kickstart", "-k", f"{_domain()}/{LABEL}"))
 
