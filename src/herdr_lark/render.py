@@ -2,21 +2,11 @@ from __future__ import annotations
 
 import hashlib
 
+from .messages import Messages
 from .models import Notification, Outbound
 
 MAX_CODE_CHARS = 8_000
 DIGEST_LINES = 15
-
-NEEDS = {"blocked": "等待审批", "done": "已完成，等你下一步"}
-
-HINTS = {
-    "blocked": (
-        "引用回复本消息。按键：只写按键名，如 1、y、down enter（y n 0-9 enter esc tab up down left right space）。"
-        "输入文字：以「输入 」或「text 」开头，其后内容原样输入并回车。其他回复（如 yes、no、是、否）不会被执行。"
-    ),
-    "done": "引用回复本消息，内容会作为新提示词发送。",
-}
-
 
 RULE_CHARS = frozenset("─━═-_╌┄")
 RULE_WIDTH = 24
@@ -37,10 +27,10 @@ def _compact(raw: str) -> list[str]:
     return rows
 
 
-def tail_screen(raw: str, lines: int) -> str:
+def tail_screen(raw: str, lines: int, m: Messages) -> str:
     text = "\n".join(_compact(raw)[-lines:])
     if len(text) > MAX_CODE_CHARS:
-        text = "…(已截断)\n" + text[-MAX_CODE_CHARS:]
+        text = m.truncated + "\n" + text[-MAX_CODE_CHARS:]
     return text
 
 
@@ -50,18 +40,17 @@ def screen_digest(raw: str) -> str:
 
 
 def render_notification(
-    n: Notification, screen: str, lines: int, note: str | None = None
+    n: Notification, screen: str, lines: int, m: Messages, note: str | None = None
 ) -> Outbound:
     s = n.snapshot
-    header = (
-        f"[{s.workspace_label}] {s.display_name} ({s.agent})\n"
-        f"{NEEDS[n.kind]}"
-    )
+    needs = m.needs_blocked if n.kind == "blocked" else m.needs_done
+    hint = m.hint_blocked if n.kind == "blocked" else m.hint_done
+    header = f"[{s.workspace_label}] {s.display_name} ({s.agent})\n{needs}"
     if note:
         header = f"{note}\n{header}"
     return Outbound(
-        title=f"{s.display_name}：{NEEDS[n.kind]}",
+        title=f"{s.display_name}: {needs}",
         text=header,
-        code=tail_screen(screen, lines) or "(屏幕为空)",
-        footer=HINTS[n.kind],
+        code=tail_screen(screen, lines, m) or m.screen_empty,
+        footer=hint,
     )

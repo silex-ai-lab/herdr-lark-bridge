@@ -8,6 +8,7 @@ from typing import Callable, Sequence, assert_never
 
 from .decide import decide
 from .herdr import HerdrError, HerdrPort
+from .messages import messages
 from .lark import LarkClient, LarkError, LarkTransport
 from .models import (
     Action,
@@ -52,6 +53,7 @@ class Engine:
         self._lark = lark
         self._store = store
         self._cfg = cfg
+        self._m = messages(cfg.lang)
         self._owner = owner
         self._pairing = pairing
         self._clock = clock
@@ -120,9 +122,9 @@ class Engine:
             if n.kind == "blocked":
                 log.warning("cannot read screen for %s: %s", n.snapshot.display_name, e)
                 return False
-            screen = f"(无法读取屏幕：{e})"
+            screen = self._m.screen_unreadable.format(error=e)
         digest = screen_digest(screen) if n.kind == "blocked" else None
-        out = render_notification(n, screen, self._cfg.screen_lines, note)
+        out = render_notification(n, screen, self._cfg.screen_lines, self._m, note)
         try:
             message_id = self._lark.send_to_user(owner, out)
         except LarkError as e:
@@ -157,7 +159,7 @@ class Engine:
             snapshots = self._herdr.list_agents()
         except HerdrError as e:
             self._note_herdr(e)
-            self._reply(inbound, Reply(f"herdr 不可用：{e}"))
+            self._reply(inbound, Reply(self._m.herdr_unavailable.format(error=e)))
             return
         self._note_herdr(None)
         action = owner_action(inbound, self.state, snapshots, self._cfg, now)
@@ -173,9 +175,7 @@ class Engine:
             self._pairing.save(remaining)
         log.info("pairing attempt from %s: %s", inbound.sender_open_id, outcome)
         if outcome == "paired":
-            self._reply(
-                inbound, Reply("配对成功。之后 agent 的审批和完成通知会发到这里。发 /help 查看用法。")
-            )
+            self._reply(inbound, Reply(self._m.paired))
 
     def _dialog_unchanged(self, pane_id: str, expected: str) -> bool:
         return screen_digest(self._herdr.read_visible(pane_id)) == expected
@@ -187,11 +187,14 @@ class Engine:
         sent = s is not None and self._notify(
             Notification(s, "blocked", s.state_change_seq),
             owner,
-            "对话框已变化，你刚才的回复没有执行。请看下面的最新屏幕，并引用回复这条新消息。",
+            self._m.dialog_changed_note,
         )
         self._reply(
             inbound,
-            Reply("对话框已变化，未执行任何操作。" + ("已发送最新屏幕。" if sent else "发 /read 查看当前屏幕。")),
+            Reply(
+                self._m.dialog_changed_reply
+                + (self._m.latest_screen_sent if sent else self._m.use_read)
+            ),
         )
 
     def _execute(
@@ -205,28 +208,32 @@ class Engine:
                     self._reply(inbound, action)
                 case Prompt(pane_id, text):
                     self._herdr.prompt(pane_id, text)
-                    self._reply(inbound, Reply("已发送。"))
+                    self._reply(inbound, Reply(self._m.sent))
                 case Keys(pane_id, keys, digest):
                     if not self._dialog_unchanged(pane_id, digest):
                         self._dialog_changed(inbound, owner, pane_id, snapshots)
                         return
                     self._herdr.send_keys(pane_id, keys)
-                    self._reply(inbound, Reply(f"已发送按键：{' '.join(keys)}"))
+                    self._reply(inbound, Reply(self._m.keys_sent.format(keys=" ".join(keys))))
                 case Text(pane_id, text, digest):
                     if not self._dialog_unchanged(pane_id, digest):
                         self._dialog_changed(inbound, owner, pane_id, snapshots)
                         return
                     self._herdr.send_text(pane_id, text)
                     self._herdr.send_keys(pane_id, ("enter",))
-                    self._reply(inbound, Reply("已输入并回车。"))
+                    self._reply(inbound, Reply(self._m.typed_enter))
                 case Read(pane_id, lines):
-                    screen = tail_screen(self._herdr.read(pane_id, lines * READ_FACTOR), lines)
-                    self._reply(inbound, Reply("屏幕内容：", screen or "(屏幕为空)"))
+                    screen = tail_screen(
+                        self._herdr.read(pane_id, lines * READ_FACTOR), lines, self._m
+                    )
+                    self._reply(
+                        inbound, Reply(self._m.screen_header, screen or self._m.screen_empty)
+                    )
                 case _:
                     assert_never(action)
         except HerdrError as e:
             log.warning("herdr command failed: %s", e)
-            self._reply(inbound, Reply(f"herdr 执行失败：{e}"))
+            self._reply(inbound, Reply(self._m.herdr_failed.format(error=e)))
 
     def _reply(self, inbound: Inbound, r: Reply) -> None:
         try:
